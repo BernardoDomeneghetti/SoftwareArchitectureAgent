@@ -15,6 +15,6 @@ def search_for_embedding(query_embedding, embeddings, top_k=5):
         similarity = cosine_similarity(query_embedding, emb)
         print(f"Similaridade entre a consulta e '{termo}': {similarity}")
         similarities.append((termo, similarity))
-    top_indices = [termo for termo in sorted(similarities, key=lambda x: x[1], reverse=True)[:top_k]]
+    top_tuples = sorted(similarities, key=lambda x: x[1], reverse=True)[:top_k]
 
-    return top_indices
+    return top_tuples

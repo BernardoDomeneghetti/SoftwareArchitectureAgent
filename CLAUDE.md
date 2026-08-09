@@ -50,12 +50,41 @@ Leia estes antes de responder qualquer coisa sobre o plano de estudos:
 
 | Arquivo | Conteúdo |
 |---|---|
+| `agent_settings/000-current_status.md` | **Leia primeiro.** Progresso real por etapa do plano, decisões de design já tomadas e dívidas técnicas |
 | `agent_settings/000-current_knoledge.md` | O que ele já domina e o que ainda falta |
 | `agent_settings/001-project_context.md` | Objetivo, requisitos da vaga, regras |
 | `agent_settings/002-study_script.md` | Plano de estudos completo (dia a dia) |
 | `agent_settings/003-current_environment.md` | Estado atual do ambiente e decisões tomadas |
 
 Quando uma decisão nova for tomada (ferramenta, arquitetura, override do plano), **atualize `agent_settings/003-current_environment.md`**.
+
+### Protocolo de memória viva (executar a cada mensagem)
+
+Os dois arquivos `000-*` não são relatórios de fim de dia — são **memória de trabalho**. O ciclo abaixo roda a cada turno da conversa:
+
+**1. Consultar (sempre).** Antes de responder, leia `000-current_status.md` e `000-current_knoledge.md`. Eles definem onde o aluno está e o que ele já domina — e portanto que pergunta faz sentido fazer agora.
+
+**2. Atualizar (somente se houve progresso real neste turno).**
+
+Atualize `000-current_status.md` quando houver progresso de **código**, **configuração** ou **estado do plano**:
+
+- arquivo criado, editado ou removido no `src/`
+- dependência adicionada, versão alterada, variável de ambiente introduzida
+- tarefa do `002-study_script.md` concluída, ou critério de "pronto quando" atingido
+- decisão de design tomada (registre **o motivo**, não só a decisão)
+- dívida técnica assumida conscientemente, ou dívida quitada
+
+Atualize `000-current_knoledge.md` quando houver progresso de **conhecimento** — mova o item de "Pendente" para "Possuídos" apenas quando o aluno **demonstrar** o entendimento, não quando ele apenas ler ou concordar. Evidência aceitável:
+
+- ele deduz a consequência de um conceito sem que você a enuncie
+- ele identifica sozinho a falha no próprio raciocínio ou código
+- ele aplica o conceito num contexto diferente daquele em que aprendeu
+
+Concordar ("entendi", "faz sentido") **não** é evidência. Na dúvida, não promova.
+
+**3. Não fazer nada** se o turno foi só conversa, pergunta conceitual respondida ou exploração sem conclusão. Ruído em arquivo de memória custa mais caro do que ausência de registro.
+
+**Estilo das atualizações:** edite cirurgicamente as seções afetadas, não reescreva o arquivo inteiro. Mantenha o campo "Última atualização" e "Posição no plano" corretos. Seja específico e verificável — "refatorou a linha de retorno de `search_for_embedding` para eliminar comprehension identidade" vale mais do que "melhorou o RAG". Registre o progresso silenciosamente; não narre a atualização ao aluno a menos que ele pergunte.
 
 ---
 
