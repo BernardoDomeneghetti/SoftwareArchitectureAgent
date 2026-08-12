@@ -73,3 +73,11 @@ load_dotenv()
 
 - Usuário tem forte background em .NET/C#, Docker e sistemas distribuídos — analogias com esse ecossistema são o formato didático usado ao longo do plano.
 - Prefere entender o processo "sob o capô" antes de usar comandos que aglutinam múltiplas etapas (ex.: preferiu ver `uv venv` separadamente antes de um comando único).
+- **Regra dura (2026-08-11):** comandos de configuração de ambiente (`uv add`, `docker run`, etc.) são sempre executados pelo próprio usuário, nunca pelo agente — faz parte do aprendizado. Formalizado em `CLAUDE.md` (seção 1, item 7) depois que o agente rodou `uv add mcp` diretamente por engano.
+
+## Ambiente — MCP / Dia 2 (2026-08-11)
+
+- **SDK MCP:** `mcp==2.0.0` instalado em `src/pyproject.toml` (via `uv add mcp` — exceção pontual, rodado pelo agente por engano antes da regra acima existir).
+- **Banco de dados:** PostgreSQL 16 em container Docker (`docker run --name mcp-logs-db ... -p 5432:5432 -d postgres:16`), rodando no WSL do usuário. Banco `microservices_logs`, usuário/senha `postgres`/`postgres` (uso local de estudo, sem preocupação de segurança).
+- **Schema:** tabela `service_logs` (`id, created_at, service, origin, level CHECK IN INFO/WARN/ERROR/TIMEOUT, message, duration_ms, correlation_id`), criada pelo usuário via `psql` dentro do container.
+- **Driver Python decidido:** `asyncpg` (assíncrono nativo) em vez de `psycopg2` — motivo: o SDK do MCP já é assíncrono (starlette/anyio como dependências transitivas), então um driver síncrono bloquearia a thread durante a query. Ainda não instalado — próxima sessão.

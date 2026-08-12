@@ -63,3 +63,16 @@
 - Conectou o dilema "abrir conexão nova por chamada vs. reaproveitar sessão" ao problema conhecido do `HttpClient` em .NET, e concluiu sozinho — a partir da solução real desse problema (`IHttpClientFactory`) — que faz sentido **terceirizar o gerenciamento da conexão/sessão para um componente especializado** em vez de gerenciar manualmente. *Evidência: transferência de um padrão de solução .NET para um problema novo em MCP, sem que o mentor apontasse a analogia.*
 - Corrigiu sozinho sua própria hipótese inicial (MCP ~ REST Web API) para o modelo correto (RPC), ao reconhecer que "chamar uma tool pelo nome com parâmetros" é uma chamada de função remota, não uma operação sobre recurso.
 - Reconstruiu, por dedução guiada, a estrutura essencial do **JSON-RPC** sem conhecer o nome do protocolo: chegou a `method`/`params` via RPC, chegou ao **correlation ID** citando GUIDs de sistemas distribuídos, e — aplicando a mesma lógica duas vezes (para `params` e depois para "origem") — concluiu sozinho que a resposta não precisa ecoar dados que o client já mantém localmente (ex: `Dictionary<Guid, ...>`), convergindo para `{id, result}` + objeto de erro separado. *Evidência mais forte: auto-aplicação do próprio argumento de redundância a um segundo campo, sem que o mentor precisasse repetir o raciocínio.*
+
+### 2026-08-11 — Semana 1, Dia 2 (continuação — transporte stdio)
+
+- Deduziu que, para processos na mesma máquina, o transporte tenderia a ser local em vez de rede tradicional.
+- Conectou o mecanismo de redirecionamento de stdout/stdin de processo pai/filho ao pipe `|` do shell **por conta própria**, reconhecendo-os como o mesmo primitivo do SO.
+- Identificou o problema de framing (delimitação de mensagens num stream contínuo de bytes) e, a partir do caso concreto de `\n`/Enter, **generalizou para uma regra abstrata**: um caractere delimitador só funciona se for proibido dentro do conteúdo da mensagem. Aplicou a regra corretamente ao MCP como "uma mensagem JSON por linha". *Evidência: generalização de um exemplo concreto para uma regra reutilizável, sem que o mentor enunciasse a regra abstrata primeiro.*
+
+### 2026-08-11 — Semana 1, Dia 3 (LCEL — pipe syntax e Runnable protocol)
+
+- Autocorrigiu a hipótese inicial de que `__or__`/`\|` executaria a chain imediatamente na composição — reconheceu, ao ser questionado sobre a ordem temporal dos eventos, que o operador só **registra** os passos, e a execução real fica para `.invoke()`. *Evidência: identificou sozinho a falha no próprio raciocínio ao ser confrontado com a linha de código real.*
+- Propôs, sem receber a resposta pronta, um contrato genérico (`IRunnable<TIn, TOut>` com método único parametrizado, análogo a `IRequestHandler<TRequest,TResponse>`) como solução para heterogeneidade de tipos numa chain — chegando muito perto do nome real do conceito (Runnable protocol) antes de ele ser revelado.
+- Deduziu corretamente, a partir do contrato genérico, a regra de compatibilidade de tipos entre componentes encadeáveis (`TOut` de um = `TIn` do próximo).
+- Mapeou corretamente `.batch()` do LCEL para o padrão de disparar múltiplas `Task`s e aguardá-las juntas (`Task.WhenAll`), com a lógica certa mesmo errando o nome exato do método.

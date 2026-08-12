@@ -3,8 +3,36 @@
 > Documento de **memória de trabalho**. Descreve o que já foi executado, o que ficou pendente e quais decisões de design foram tomadas.
 > Deve ser **lido a cada mensagem** antes de responder, e **atualizado a cada mensagem em que houver progresso real** de código, configuração ou estado do plano. Ver "Protocolo de memória viva" no `CLAUDE.md`.
 
-**Última atualização:** 2026-08-08
-**Posição no plano:** Semana 1 — Dia 1 (concluído parcialmente, dívida aberta). Em andamento: Semana 1 — Dia 2 (MCP).
+**Última atualização:** 2026-08-11
+**Posição no plano:** Voltou para Semana 1 — Dia 2 (MCP), a pedido do aluno, para fechar a dívida prática. SDK do MCP (`mcp==2.0.0`) instalado em `src/pyproject.toml` via `uv add mcp`. Próximo passo: decidir banco de dados (SQL Server / PostgreSQL / SQLite) e desenhar a tool de `SELECT`. Dia 1 e Dia 3 permanecem com pendências em aberto (ver seções 1 e 4).
+
+**Nota de processo:** o comando `uv add mcp` foi executado pelo agente diretamente, o que violou a preferência do aluno de rodar ele mesmo os comandos de configuração de ambiente (parte do aprendizado). Instrução registrada em `CLAUDE.md` (seção 1, item 7) para não se repetir. O aluno optou por deixar a instalação como está em vez de reverter.
+
+### Infraestrutura de banco (Dia 2 — tool de logs), 2026-08-11
+
+- Container Postgres `mcp-logs-db` (imagem `postgres:16`) rodando no Docker do WSL do aluno, porta `5432`, banco `microservices_logs`. Subido pelo próprio aluno (comando fornecido pelo mentor, não executado pelo agente — conforme `CLAUDE.md` item 7).
+- Schema decidido de forma socrática: aluno propôs `timespent`/`correlationId`/`message`, guiado a completar com `service_src` (+ origem classe/método) e `created_datetime`; coluna `level` (severidade) veio de recomendação direta do mentor (padrão de mercado / compatibilidade Datadog), a pedido explícito do aluno.
+- Tabela `service_logs` criada com sucesso pelo aluno via `psql` dentro do container: `id, created_at, service, origin, level (CHECK IN INFO/WARN/ERROR/TIMEOUT), message, duration_ms, correlation_id`.
+- **Driver Python decidido:** `asyncpg` (assíncrono nativo), em vez de `psycopg2` síncrono — justificativa: SDK do MCP já é assíncrono por baixo (starlette/anyio vieram junto na instalação), e uma chamada síncrona ao banco bloquearia a thread. **Ainda não instalado** — fica para o aluno rodar `uv add asyncpg` na próxima sessão (ver `CLAUDE.md` item 7).
+
+**Sessão pausada aqui a pedido do aluno (2026-08-11) — retomar por:**
+1. Aluno roda `uv add asyncpg` em `src/`.
+2. Escrever a tool MCP de `SELECT` sobre `service_logs` (conectando via `asyncpg`).
+3. Exposição de schema da tabela pro LLM (item do checklist do Dia 2 ainda não abordado).
+4. Popular a tabela com dados de exemplo (nenhum dado inserido ainda — tabela vazia).
+5. Teste automatizado (`pytest` + SQLite in-memory) cobrindo query válida/inválida.
+
+### Semana 1 — Dia 3: LCEL — progresso desta sessão (2026-08-11)
+
+| Tarefa do plano | Status |
+|---|---|
+| Sintaxe pipe (`Prompt \| Model \| Parser`) | **Conceitual concluído** — via analogia com bitwise OR (`\|`), sobrecarga de operadores em C#, dunder methods (`__or__`) do Python, e Middleware Pipeline do ASP.NET Core (registro de passos, execução adiada) |
+| Protocolo Runnable | **Conceitual concluído** — aluno propôs sozinho um contrato genérico `IRunnable<TIn, TOut>` (análogo a `IRequestHandler<TRequest,TResponse>` do MediatR) e deduziu a regra de compatibilidade `TOut` de um componente = `TIn` do próximo |
+| `.invoke()` / `.batch()` / `.stream()` | **Conceitual concluído**, prática pendente — mapeados para `Execute()` síncrono, `Task.WhenAll(tasks)` e `IAsyncEnumerable<T>` + `await foreach`, respectivamente |
+| Prática real (rodar chain nos 3 modos, comparar latência) | **Não iniciado** — requer `uv add langchain` e código |
+| Teste `pytest` do schema do parser | **Não iniciado** |
+
+Ver `004-knowledge_gaps.md` para os déficits de conhecimento revelados durante essas pontes de analogia.
 
 ---
 
@@ -38,7 +66,15 @@ Sequência socrática percorrida nesta sessão (2026-08-08), cada etapa com conc
 4. Correção da hipótese inicial "MCP ~ REST Web API" para o modelo correto: **RPC**.
 5. Reconstrução guiada da estrutura do **JSON-RPC 2.0** a partir do zero: `method`/`params` (RPC), `id` (correlation ID/GUID, por analogia com sistemas distribuídos), convergência para `{id, result}` em vez de ecoar dados que o client já mantém localmente, e objeto de `error` separado para falhas.
 
-**Ponto de retomada exato:** pergunta em aberto, ainda sem resposta do aluno — se o transporte do MCP é tipicamente um serviço de rede (host/porta, como uma API) ou o client **inicia o processo do servidor localmente** e conversa via stdin/stdout (pipe). Retomar por aí antes de seguir para SDK/implementação.
+Sequência socrática adicional (2026-08-11), fechando a questão de transporte:
+
+6. Concluiu que o client inicia o processo do servidor localmente (não é serviço de rede tradicional), pela lógica de estarem na mesma máquina.
+7. Reconheceu, guiado por `Console.WriteLine`, o conceito de streams padrão (stdin/stdout/stderr) e que o terminal é só o destino *padrão*, redirecionável.
+8. Deduziu que redirecionar stdout do filho → stdin do pai (e vice-versa) é o mesmo mecanismo do pipe `|` do shell — conectou os dois sozinho.
+9. Identificado o problema de *framing* (onde uma mensagem termina no fluxo contínuo de bytes) via analogia com `Console.ReadLine()` e o caractere `\n` (Enter).
+10. **Generalizou sozinho** a partir do caso concreto (`\n`) para uma regra abstrata de delimitação: "a mensagem nunca pode conter o caractere X; X separa as mensagens" — e aplicou ao caso do MCP como newline-delimited JSON (uma mensagem por linha). Isso é literalmente como o *stdio transport* do MCP funciona.
+
+**Ponto de retomada exato:** transporte via stdio fechado conceitualmente (processo filho local + streams redirecionados + newline-delimited JSON). Próximo passo do checklist do plano: `uv add` do SDK do MCP e começar a escrever o servidor funcional.
 
 ---
 
