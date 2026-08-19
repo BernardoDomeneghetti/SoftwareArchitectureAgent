@@ -11,3 +11,4 @@ def _required(name: str) -> str:
 
 OPENAI_API_KEY = _required("OPENAI_API_KEY")
 LANGSMITH_API_KEY = _required("LANGSMITH_API_KEY")
+POSTGRES_CONNECTION_STRING = _required("POSTGRES_CONNECTION_STRING")
