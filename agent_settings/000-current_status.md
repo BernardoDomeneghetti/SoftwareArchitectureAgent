@@ -3,7 +3,7 @@
 > Documento de **memória de trabalho**. Descreve o que já foi executado, o que ficou pendente e quais decisões de design foram tomadas.
 > Deve ser **lido a cada mensagem** antes de responder, e **atualizado a cada mensagem em que houver progresso real** de código, configuração ou estado do plano. Ver "Protocolo de memória viva" no `CLAUDE.md`.
 
-**Última atualização:** 2026-08-19
+**Última atualização:** 2026-08-24 (retomada — `call_rag_node` e `call_logs_node` completos e validados; `call_logs_node` rodou de ponta a ponta com client+server MCP reais pela primeira vez no projeto, após depurar 7 bugs (imports, arquitetura client vs. server, 2 erros de execução reais, 1 problema de infra, 1 bug de framing herdado do Dia 2, 1 divergência de tipo); faltam nós `A`/`D` e a montagem do grafo — ver seção 1)
 **Posição no plano:** Semana 1 — Dia 2 (MCP) estruturalmente completo (caminhos de arquivo atualizados após a reorganização em pacotes: `mcp_server/context_lifespan.py`, `mcp_server/mcp_server_provider.py`, `mcp_server/logs_mcp.py`, `entrypoints/logs_query_mcp_demo.py`). Falta rodar o entrypoint mais uma vez de verdade (só a cadeia de import foi revalidada nesta sessão, não o `mcp.run()` propriamente) e o teste automatizado (`pytest`). Dia 3 (LCEL) avançou bastante em 2026-08-19: pacotes `langchain-core`/`langchain-openai` instalados, `entrypoints/lcel_demo.py` funcional integrando o RAG do Dia 1 com uma chain real. Dia 1 (pytest da cosine similarity) e o teste automatizado do Dia 2 seguem em aberto — mesmo padrão de "avançar e voltar depois" já usado antes (ver seções 1 e 4).
 
 ### Sessão 2026-08-19 — retomada do Dia 3 (LCEL), instalação dos pacotes
@@ -51,6 +51,49 @@ Implementada com: assinatura tipada (todos os 5 filtros opcionais via `Tipo | No
 1. Rodar `logs_query_mcp_starter.py` de novo pra validar que o `resource` novo não quebrou nada (import, registro) — ainda não testado desde que `get_logs_table_schema` foi adicionado.
 2. Teste automatizado (`pytest` + SQLite in-memory ou mock de `pool`) cobrindo `query_logs` (query válida/inválida) e `get_logs_table_schema`.
 3. Único item do checklist original do Dia 2 ainda em aberto além de testes: nenhum — dados de exemplo e exposição de schema concluídos nesta sessão.
+
+### Semana 2 — Dia 1: LangGraph — estado desenhado, ainda não implementado (2026-08-19)
+
+Aluno decidiu avançar direto pra Semana 2 no mesmo dia, deixando o pytest do Dia 3 e as dívidas de Dia 1/Dia 2 em aberto. Antes de entrar no design, validamos pré-requisito (regra do `CLAUDE.md` item 3): `TypedDict` nunca tinha sido tocado — aluno não conhecia, mas deduziu corretamente por analogia com interface do C# que é "um contrato"; corrigido o ponto-chave de que `TypedDict` **não tem nenhuma checagem em tempo de execução** (diferente de interface do C#, checada pelo compilador) — é só metadado pra type checkers estáticos (mypy/pyright/IDE). Testado e confirmado empiricamente que `= None` dentro de um `TypedDict` **não cria valor padrão nenhum** (`__required_keys__` continua marcando a chave como obrigatória) — o mecanismo certo pra chave opcional é `NotRequired[...]`, ainda não escrito em código.
+
+**Estado desenhado (conceitual, só na conversa, código pendente):**
+```python
+class State(TypedDict):
+    user_message: str
+    rag_response: NotRequired[list[str] | None]   # nem toda pergunta aciona o RAG
+    related_logs: NotRequired[list[dict] | None]  # nem toda pergunta aciona a busca de logs (MCP)
+    inference_result: str                         # sempre presente — a LLM sempre responde algo, mesmo "não sei"
+```
+
+Raciocínio do aluno vale registrar: `related_logs: list[dict]` porque cada linha de log do Postgres já vira um `dict` ao ser lida (mesma tradução que a tool `query_logs` do Dia 2 já faz); `rag_response: list[str]` (não só um termo) porque a busca já é parametrizável por `top_k` em `search_for_embedding` — não faz sentido travar o estado a só 1 resultado. `inference_result` não é opcional porque, independente de quais nós rodarem, o grafo sempre termina gerando alguma resposta pro usuário.
+
+**Nome do pacote decidido (2026-08-24): `orchestration/`**, não `graph/`. Aluno propôs `graph/` (nome da ferramenta, LangGraph); questionado se `rag/`/`mcp_server/` nomeiam responsabilidade ou biblioteca, convergiu para `orchestration/` — mantém a convenção dos dois pacotes existentes (nome descreve o que o pacote faz: decidir quando acionar RAG e/ou a tool MCP e combinar em `inference_result`), não a tecnologia usada por baixo (LangGraph). Verificado que não havia risco de colisão de nome com pacote instalado (`langgraph` ainda não está no `.venv` nesta sessão) — motivo diferente do que gerou a troca `mcp/` → `mcp_server/`.
+
+**`src/orchestration/` criado (2026-08-24):** `__init__.py` + `state.py` com `State(TypedDict)` completo (aluno escreveu o corpo sozinho, mentor só apontou a falta do import de `TypedDict`/`NotRequired` de `typing` quando questionado — aluno reconheceu que faltava import mas não sabia qual).
+
+**Topologia do grafo decidida (2026-08-24), por dedução do aluno:**
+- Nó `A` (entrada/decisão) — aresta condicional pra `B`, `C`, ambos (fan-out) ou `D` sozinho.
+- Nó `B` (busca em logs, via MCP) — aresta incondicional pra `D`.
+- Nó `C` (busca no RAG) — aresta incondicional pra `D`.
+- Nó `D` (saída).
+Trajetória de raciocínio: proposta inicial tinha um nó `Evaluate` fazendo `A -> B -> Evaluate -> C -> Evaluate -> D` (execução sequencial com reavaliação); questionado sobre paralelismo em sistemas distribuídos (`Task.WhenAll`/scatter-gather, que ele já usou em C#), transferiu o padrão sozinho e concluiu que uma aresta condicional pode devolver **lista** de destinos (`["B","C"]`), eliminando o `Evaluate`. Também concluiu sozinho, sob pergunta, que `D` só é retornado pela função condicional de `A` **quando nem `B` nem `C` são necessários** — nunca junto com eles (senão `D` rodaria antes da busca terminar).
+
+**`orchestration/nodes.py` criado (2026-08-24) — `call_rag_node` completo e correto.** Assinatura `def call_rag_node(state: State) -> dict:` chegou por dedução do aluno via analogia com middleware ASP.NET Core (recebe `state`, mas — diferente do middleware, que muta o `HttpContext` — devolve um `dict` parcial novo; motivo explicado pelo mentor a pedido do aluno: nós rodando em paralelo via fan-out não podem mutar o mesmo objeto sem risco do mesmo bug de "sobrescrita silenciosa" já visto no Dia 1). Depuração guiada por perguntas, sem correção pronta, corrigiu sozinho quatro bugs próprios em sequência: (1) variável local nomeada `dict`, sombreando o builtin; (2) tentativa de indexar o resultado de `search()` por chave string (`["term"]`) achando que era uma lista de dicts, quando na real é lista de tuplas posicionais (`(termo, similarity)`) — corrigido para índice numérico; (3) colchete duplicado (erro de sintaxe) introduzido durante uma dessas edições; (4) retornava uma `str` solta em `rag_response`, quando `State` declara `list[str]` — corrigido envolvendo em lista (`[rag_term]`). Levantou por conta própria a ideia de deixar a LLM decidir `top_k` dinamicamente; avaliado como legítimo mas prematuro (exigiria campo novo no `State`, e `vector_store_mock` só tem 3 termos fixos hoje) — registrado como melhoria futura, não implementado. Docstring corrigida para português a pedido explícito do aluno ("arruma pra mim, objetivamente").
+
+**`call_logs_node` completo e validado em execução real (2026-08-24) — primeira vez que client e server MCP reais rodam juntos no projeto.** Decisão de arquitetura (guiada por pergunta, não imposta): reutilizar o servidor MCP do Dia 2 como **processo separado** via `stdio_client`/`Client` do SDK (`mcp.client`), em vez do atalho in-process que o próprio SDK oferece (`Client(mcp_server_instance)`, visto no docstring) — decisão do aluno, justificando que o objetivo declarado da Semana 1/Dia 2 foi treinar a mecânica real do protocolo, e o atalho in-process jogaria isso fora. Também motivado por: `query_logs` não pode ser chamada como função Python solta (usa `ctx.request_context.lifespan_context.pool`, e `ctx` só existe dentro de uma sessão MCP real — chamar sem client faria `None.request_context` estourar, análogo a `NullReferenceException`).
+
+Depuração real (sequência de bugs, todos corrigidos pelo aluno sob pergunta, incluindo dois erros de execução reais com traceback):
+1. Import trocado `from multiprocessing.connection import Client` (nome colidindo com stdlib) → corrigido para `from mcp.client import Client` + `from mcp.client.stdio import StdioServerParameters, stdio_client`.
+2. Confundiu o `Pool` do Postgres (responsabilidade do *servidor*, já existente em `mcp_server_provider.py`) com a conexão do *client* ao processo do servidor — identificou sozinho, sob pergunta, que o client só consome o serviço, não gerencia a infra do servidor.
+3. Chamou `query_logs(conn)` direto de novo (mesmo padrão descartado antes) em vez de `conn.call_tool("query_logs", {...})` — corrigido após lembrete do método correto (recall factual, não dedutível).
+4. **Erro de execução real:** `TypeError: 'tuple' object does not support the asynchronous context manager protocol` — código fazia `async with stdio_client(params) as transport` (abrindo o transporte) e depois passava a tupla já aberta pra `Client(transport)`, que tenta abrir ele mesmo por dentro. Aluno interpretou a mensagem de erro corretamente (com guia) e concluiu que `Client` espera o context manager **fechado**, não a tupla já aberta — mentor aplicou a correção a pedido explícito do aluno ("implemente você"), só 1 `async with` (o do `Client`), sem abrir `stdio_client` manualmente.
+5. **Erro de infraestrutura real:** container Postgres (`mcp-logs-db`) não estava rodando — servidor MCP crashava no próprio `lifespan` ao tentar `asyncpg.create_pool`, e a sessão do client caía com "Connection closed". Resolvido subindo o container.
+6. **Bug de framing real, conectado à lição do Dia 2:** `mcp_server_provider.py.lifespan()` tinha vários `print(...)` de debug escritos em stdout — no mesmo canal usado pro JSON-RPC newline-delimited. Isso quebrava o parsing no client (`Failed to parse JSONRPC message`). Aluno reconheceu sozinho, ao ser lembrado da regra de framing do Dia 2, que linhas de debug em stdout violam a regra "uma mensagem JSON por linha", e removeu os prints.
+7. `resultado.structured_content` veio como `{"result": [...]}` (camada extra de aninhamento da tool `query_logs`, que devolve `list[dict]` mas o SDK embrulha em `{"result": ...}`) — aluno identificou a divergência com o tipo declarado em `State` (`list[dict]`) e corrigiu pra `resultado.structured_content["result"]`.
+
+Teste isolado criado em `entrypoints/logs_node_demo.py` (mentor escreveu a pedido explícito do aluno, "tá tarde, faz pra mim") — roda `call_logs_node` com um `State` de teste via `asyncio.run`, imprime o resultado. Rodado várias vezes ao vivo durante a depuração; resultado final: 10 logs reais do Postgres retornados corretamente em `related_logs`. Caveat cosmético não resolvido: caracteres acentuados aparecem como `�` no terminal (provavelmente encoding de exibição do console Windows, não confirmado se é só isso).
+
+**Retomar por:** escrever os nós `A` (entrada/decisão + roteamento condicional) e `D` (saída) em `orchestration/nodes.py`, depois a função de aresta condicional e a montagem do `StateGraph` (arquivo ainda não decidido — provavelmente `orchestration/graph.py`, mesma lógica de separação nós vs. wiring já usada para decidir `nodes.py`). Opcional: investigar o caveat de encoding acima.
 
 ### Semana 1 — Dia 3: LCEL — progresso desta sessão (2026-08-11, retomado em 2026-08-19)
 
@@ -200,6 +243,6 @@ src/
 
 ## 6. Próximo passo
 
-**Decisão (2026-08-19, fim de sessão):** aluno pausou o Dia 3 por vontade própria, deixando pro próximo encontro o único item restante do checklist — teste `pytest` validando o schema/tipo devolvido pela chain LCEL (`prompt | model | parser`). As três formas de execução (`.invoke()`, `.batch()`, `.stream()`) já estão implementadas e validadas em `entrypoints/lcel_invoke_demo.py`, `lcel_batch_demo.py`, `lcel_stream_demo.py`.
+**Decisão (2026-08-19, fim de sessão):** aluno avançou no mesmo dia até Semana 2/Dia 1 (LangGraph) e pausou por vontade própria logo depois de desenhar (só na conversa, não em código) o `TypedDict` de estado do grafo — ver seção 1, "Semana 2 — Dia 1: LangGraph".
 
-**Retomar a sessão por:** o teste `pytest` do Dia 3 (parser). Dívidas mais antigas que continuam em aberto, sem data prevista pra retomar: `pytest` da similaridade de cosseno (Dia 1) e teste automatizado da tool MCP (Dia 2) — ver seção 1 e seção 4.
+**Retomar a sessão por:** criar `src/orchestration/` (nome decidido em 2026-08-24, ver seção 1) e escrever de verdade a classe `State(TypedDict)` já desenhada (com `NotRequired[...]` nos campos opcionais), depois seguir pro resto do checklist do Dia 1/Semana 2 (nós, bordas condicionais, visualização do grafo). Dívidas mais antigas que continuam em aberto, sem data prevista: `pytest` do parser LCEL (Dia 3), `pytest` da similaridade de cosseno (Dia 1), teste automatizado da tool MCP (Dia 2) — ver seção 1 e seção 4.
